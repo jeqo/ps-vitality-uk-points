@@ -1,6 +1,7 @@
 package uk.vitality.points.steps;
 
 import org.apache.kafka.common.serialization.Serdes;
+import org.apache.kafka.common.utils.Bytes;
 import org.apache.kafka.streams.KeyValue;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.Topology;
@@ -26,34 +27,43 @@ class StepsManager implements Supplier<Topology> {
 
     @Override
     public Topology get() {
-        var b = new StreamsBuilder();
+        var builder = new StreamsBuilder();
+        // 1. Prepare Metadata to enrich Steps
         // only persons
-        var personsTable = b.stream("entities",
+        var personsTable = builder.stream("entities",
                         Consumed.with(Serdes.String(), JsonSerde.withType(Entity.class)).withName("read-entity-events"))
                 .filter((id, e) -> "person".equals(e.entityType()))
-                .toTable(Materialized.with(Serdes.String(), JsonSerde.withType(Entity.class)));
+                .toTable(Materialized.<String, Entity, KeyValueStore<Bytes, byte[]>>as("persons")
+                        .withKeySerde(Serdes.String())
+                        .withValueSerde(JsonSerde.withType(Entity.class)));
         // partitioned by personId
-        var policiesTable = b.stream("policies",
+        var policiesTable = builder.stream("policies",
                         Consumed.with(Serdes.String(), JsonSerde.withType(Policy.class)))
                 .flatMap((id, policy) -> policy.people().stream().map(p -> KeyValue.pair(p, policy)).collect(Collectors.toList()))
-                .toTable(Materialized.with(Serdes.String(), JsonSerde.withType(Policy.class)));
+                .toTable(Materialized.<String, Policy, KeyValueStore<Bytes, byte[]>>as("policies")
+                        .withKeySerde(Serdes.String())
+                        .withValueSerde(JsonSerde.withType(Policy.class)));
         // join persons and policies
-        var customerTable = personsTable.join(policiesTable, StepsManager::entityPolicyJoin);
+        var customerTable = personsTable.join(policiesTable, StepsManager::entityPolicyJoin,
+                Materialized.<String, Customer, KeyValueStore<Bytes, byte[]>>as("customers")
+                        .withKeySerde(Serdes.String())
+                        .withValueSerde(JsonSerde.withType(Customer.class)));
 
-        // enrich with customers metadata
-        final var enrichedStepsStream = b
+        // 2. Enrich Steps with customer metadata
+        final var enrichedStepsStream = builder
                 .stream("steps", Consumed.with(Serdes.String(), JsonSerde.withType(Steps.class)).withName("read-steps-events"))
                 .join(customerTable, StepsManager::stepsCustomerJoin);
 
-        // windowing to sum steps
+        // 3. Sum steps per day
         final var sumStepsStream = enrichedStepsStream
                 .groupByKey(Grouped.as("group-customer-steps-by-entity-id"))
                 .windowedBy(TimeWindows.ofSizeAndGrace(Duration.ofDays(1), Duration.ofDays(30)))
                 .reduce(StepsManager::stepsSum, Named.as("sum-steps"), Materialized.with(Serdes.String(), JsonSerde.withType(CustomerSteps.class)))
                 .toStream(Named.as("to-changelog"));
 
+        // 4. Map Steps to Points
         // rules to map steps to points
-        b.globalTable("steps-points",
+        builder.globalTable("steps-points",
                 Consumed.with(Serdes.String(), JsonSerde.withType(StepsPoints.class)),
                 Materialized.as("steps-points"));
 
@@ -61,8 +71,9 @@ class StepsManager implements Supplier<Topology> {
         final var pointsStream = sumStepsStream
                 .transform(StepsManager::addPoints);
 
-        // validate points per day
-        b.addStateStore(Stores.windowStoreBuilder(
+        // 5. Validate points per day
+        // Prepare window store per day
+        builder.addStateStore(Stores.windowStoreBuilder(
                 Stores.persistentWindowStore(
                         "points-per-day",
                         Duration.ofDays(7), // retention
@@ -71,17 +82,19 @@ class StepsManager implements Supplier<Topology> {
                 Serdes.String(),
                 JsonSerde.withType(ActivityPoints.class)));
 
+        // Validate points
         final var pointsValidPerDay = pointsStream
                 .peek((key, value) -> System.out.println("Points before checking: " + value))
                 .transformValues(StepsManager::validateMaxPointsPerDay, "points-per-day")
                 .peek((key, value) -> System.out.println("Points after checking: " + value))
                 .filterNot((key, value) -> Objects.isNull(value));
 
+        // 6. Write activity points
         // downstream activity points
         pointsValidPerDay.to("activity-points",
                 Produced.with(Serdes.String(), JsonSerde.withType(ActivityPoints.class))
                         .withName("write-points-from-steps"));
-        return b.build();
+        return builder.build();
 
         // point limits: (per person)
         // - 40 per week
@@ -94,7 +107,7 @@ class StepsManager implements Supplier<Topology> {
     }
 
     static CustomerSteps stepsSum(CustomerSteps left, CustomerSteps right) {
-        System.out.println("Sum " + left.stepsCount() + " and " + right.stepsCount());
+        System.out.println("Sum steps from customer " + left.customer() + ": " + left.stepsCount() + " and " + right.stepsCount());
         return new CustomerSteps(left.customer(), left.dateOfRecording(), left.stepsCount() + right.stepsCount());
     }
 
@@ -116,21 +129,16 @@ class StepsManager implements Supplier<Topology> {
                         .toInstant().toEpochMilli();
                 final var points = pointsPerDay.fetch(key, of);
                 System.out.println("Prev points: " + points);
-                if (points == null) {
-                    if (value.points() > 0) {
-                        pointsPerDay.put(key, points, of);
-                        return value;
-                    } else return null;
-                } else {
-                    if (points == 8) {
-                        return null;
-                    } else {
-                        if (value.points() > 0) {
-                            pointsPerDay.put(key, points, of);
-                            return value;
-                        } else return null;
-                    }
+                if (points == null) { // if no previous points
+                    if (value.points() == 0) return null; // if points to emit are higher than 0
+                } else { // if previous points
+                    // if already emitted max per day
+                    if (points == 8) return null;
+                    // if points to emit are higher than 0
+                    else if (value.points() == 0) return null;
                 }
+                pointsPerDay.put(key, points, of);
+                return value;
             }
 
             @Override

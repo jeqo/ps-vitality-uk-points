@@ -1,22 +1,22 @@
 package uk.vitality.points.steps;
 
 import kafka.streams.rest.armeria.HttpKafkaStreamsServer;
-import org.apache.kafka.streams.KafkaStreams;
 
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.Properties;
 
-public class Main {
+public class Server {
     public static void main(String[] args) throws IOException {
         final var streamsProps = loadProperties(args);
 
         final var stepsManager = new StepsManager();
         final var topology = stepsManager.get();
 
-        final var ks = new KafkaStreams(topology, streamsProps);
-        Runtime.getRuntime().addShutdownHook(new Thread(ks::close));
-        ks.start();
+        HttpKafkaStreamsServer.newBuilder()
+                .port(8080)
+                .build(topology, streamsProps)
+                .startApplicationAndServer();
     }
 
     private static Properties loadProperties(String[] args) throws IOException {

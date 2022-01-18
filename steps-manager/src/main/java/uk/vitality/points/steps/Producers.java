@@ -36,18 +36,6 @@ public class Producers {
         }
     }
 
-    static class StepsProducer {
-        public static void main(String[] args) throws IOException {
-            final var props = loadProperties(args);
-            final var producer = new KafkaProducer<>(props, new StringSerializer(), new JsonSerde<>(Steps.class).serializer());
-            final var steps = new Steps("customer_3",
-                    LocalDateTime.of(2022, 1, 17, 20, 0, 0),
-                    500);
-            producer.send(new ProducerRecord<>("steps", steps.entityId(), steps));
-            producer.close();
-        }
-    }
-
     static class PolicyProducer {
         public static void main(String[] args) throws IOException {
             final var props = loadProperties(args);
@@ -71,13 +59,34 @@ public class Producers {
             final var producer = new KafkaProducer<>(props,
                     new StringSerializer(),
                     new JsonSerde<>(Entity.class).serializer());
-            final var entity = new Entity("customer_3", "person",
-                    "F", LocalDate.of(1990, 10, 10));
-            producer.send(new ProducerRecord<>("entities", entity.entityId(), entity));
+            final var entity1 = new Entity("customer_1", "person",
+                    "F", LocalDate.of(1990, 10, 13));
+            producer.send(new ProducerRecord<>("entities", entity1.entityId(), entity1));
+            final var entity2 = new Entity("customer_2", "person",
+                    "F", LocalDate.of(1989, 12, 12));
+            producer.send(new ProducerRecord<>("entities", entity2.entityId(), entity2));
+            final var entity3 = new Entity("customer_3", "person",
+                    "M", LocalDate.of(1991, 1, 3));
+            producer.send(new ProducerRecord<>("entities", entity3.entityId(), entity3));
+            final var entity4 = new Entity("customer_4", "person",
+                    "M", LocalDate.of(1992, 11, 1));
+            producer.send(new ProducerRecord<>("entities", entity4.entityId(), entity4));
             producer.close();
         }
     }
 
+
+    static class StepsProducer {
+        public static void main(String[] args) throws IOException {
+            final var props = loadProperties(args);
+            final var producer = new KafkaProducer<>(props, new StringSerializer(), new JsonSerde<>(Steps.class).serializer());
+            final var steps = new Steps("customer_2",
+                    LocalDateTime.of(2022, 1, 18, 20, 0, 0),
+                    11000);
+            producer.send(new ProducerRecord<>("steps", steps.entityId(), steps));
+            producer.close();
+        }
+    }
 
     private static Properties loadProperties(String[] args) throws IOException {
         var name = "steps-manager/src/main/resources/producer";
