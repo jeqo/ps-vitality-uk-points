@@ -1,4 +1,4 @@
-package uk.vitality.points.steps.model;
+package uk.vitality.points.steps.domain;
 
 import java.time.LocalDate;
 import java.util.List;

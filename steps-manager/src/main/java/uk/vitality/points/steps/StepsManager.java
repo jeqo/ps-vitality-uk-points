@@ -12,7 +12,7 @@ import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.Stores;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
 import org.apache.kafka.streams.state.WindowStore;
-import uk.vitality.points.steps.model.*;
+import uk.vitality.points.steps.domain.*;
 import uk.vitality.points.steps.serde.JsonSerde;
 
 import java.time.*;

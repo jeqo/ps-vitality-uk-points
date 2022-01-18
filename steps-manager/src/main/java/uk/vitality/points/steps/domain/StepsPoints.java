@@ -1,4 +1,4 @@
-package uk.vitality.points.steps.model;
+package uk.vitality.points.steps.domain;
 
 // + 12.5K per day -> 8
 // > 10 K per day -> 5

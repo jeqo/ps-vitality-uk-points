@@ -1,4 +1,4 @@
-package uk.vitality.points.steps.model;
+package uk.vitality.points.steps.domain;
 
 public record Customer(
         Entity entity,

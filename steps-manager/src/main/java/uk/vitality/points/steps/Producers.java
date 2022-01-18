@@ -3,10 +3,10 @@ package uk.vitality.points.steps;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringSerializer;
-import uk.vitality.points.steps.model.Entity;
-import uk.vitality.points.steps.model.Policy;
-import uk.vitality.points.steps.model.Steps;
-import uk.vitality.points.steps.model.StepsPoints;
+import uk.vitality.points.steps.domain.Entity;
+import uk.vitality.points.steps.domain.Policy;
+import uk.vitality.points.steps.domain.Steps;
+import uk.vitality.points.steps.domain.StepsPoints;
 import uk.vitality.points.steps.serde.JsonSerde;
 
 import java.io.FileInputStream;
