@@ -21,3 +21,9 @@ topics:
 		--topic "entities" \
 		--partitions 1 --replication-factor 1 \
 		--if-not-exists
+
+stop:
+	docker-compose stop
+
+start:
+	docker-compose up -d

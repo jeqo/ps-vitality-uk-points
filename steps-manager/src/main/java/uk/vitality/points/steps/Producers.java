@@ -81,7 +81,7 @@ public class Producers {
             final var props = loadProperties(args);
             final var producer = new KafkaProducer<>(props, new StringSerializer(), new JsonSerde<>(Steps.class).serializer());
             final var steps = new Steps("customer_2",
-                    LocalDateTime.of(2022, 1, 18, 20, 0, 0),
+                    LocalDateTime.of(2022, 1, 19, 20, 0, 0),
                     11000);
             producer.send(new ProducerRecord<>("steps", steps.entityId(), steps));
             producer.close();

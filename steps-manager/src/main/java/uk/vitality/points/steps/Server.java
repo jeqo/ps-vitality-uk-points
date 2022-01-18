@@ -13,6 +13,8 @@ public class Server {
         final var stepsManager = new StepsManager();
         final var topology = stepsManager.get();
 
+        System.out.println("Kafka Streams topology: \n" + topology.describe().toString());
+
         HttpKafkaStreamsServer.newBuilder()
                 .port(8080)
                 .build(topology, streamsProps)

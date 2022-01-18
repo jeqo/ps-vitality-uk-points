@@ -7,6 +7,7 @@ import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.kstream.*;
 import org.apache.kafka.streams.processor.ProcessorContext;
+import org.apache.kafka.streams.processor.To;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.Stores;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
@@ -14,10 +15,7 @@ import org.apache.kafka.streams.state.WindowStore;
 import uk.vitality.points.steps.model.*;
 import uk.vitality.points.steps.serde.JsonSerde;
 
-import java.time.Duration;
-import java.time.LocalTime;
-import java.time.ZoneId;
-import java.time.ZonedDateTime;
+import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.util.Objects;
 import java.util.function.Supplier;
@@ -31,45 +29,61 @@ class StepsManager implements Supplier<Topology> {
         // 1. Prepare Metadata to enrich Steps
         // only persons
         var personsTable = builder.stream("entities",
-                        Consumed.with(Serdes.String(), JsonSerde.withType(Entity.class)).withName("read-entity-events"))
-                .filter((id, e) -> "person".equals(e.entityType()))
-                .toTable(Materialized.<String, Entity, KeyValueStore<Bytes, byte[]>>as("persons")
+                        Consumed.with(Serdes.String(), JsonSerde.withType(Entity.class))
+                                .withName("read-entity-events"))
+                .filter((id, e) -> "person".equals(e.entityType()), Named.as("only-persons"))
+                .toTable(Named.as("to-only-persons-table"), Materialized.<String, Entity, KeyValueStore<Bytes, byte[]>>as("persons")
                         .withKeySerde(Serdes.String())
                         .withValueSerde(JsonSerde.withType(Entity.class)));
         // partitioned by personId
         var policiesTable = builder.stream("policies",
-                        Consumed.with(Serdes.String(), JsonSerde.withType(Policy.class)))
-                .flatMap((id, policy) -> policy.people().stream().map(p -> KeyValue.pair(p, policy)).collect(Collectors.toList()))
-                .toTable(Materialized.<String, Policy, KeyValueStore<Bytes, byte[]>>as("policies")
+                        Consumed.with(Serdes.String(), JsonSerde.withType(Policy.class))
+                                .withName("read-policies"))
+                .flatMap((id, policy) -> policy.people().stream().map(p -> KeyValue.pair(p, policy)).collect(Collectors.toList()),
+                        Named.as("to-policy-per-person"))
+                .toTable(Named.as("to-policy-person-table"), Materialized.<String, Policy, KeyValueStore<Bytes, byte[]>>as("policies")
                         .withKeySerde(Serdes.String())
                         .withValueSerde(JsonSerde.withType(Policy.class)));
         // join persons and policies
         var customerTable = personsTable.join(policiesTable, StepsManager::entityPolicyJoin,
+                Named.as("join-entity-and-policy"),
                 Materialized.<String, Customer, KeyValueStore<Bytes, byte[]>>as("customers")
                         .withKeySerde(Serdes.String())
                         .withValueSerde(JsonSerde.withType(Customer.class)));
 
         // 2. Enrich Steps with customer metadata
         final var enrichedStepsStream = builder
-                .stream("steps", Consumed.with(Serdes.String(), JsonSerde.withType(Steps.class)).withName("read-steps-events"))
-                .join(customerTable, StepsManager::stepsCustomerJoin);
+                .stream("steps", Consumed.with(Serdes.String(), JsonSerde.withType(Steps.class))
+                        .withTimestampExtractor((record, partitionTime) -> {
+                            var r = (Steps) record.value();
+                            return r.dateOfRecording().toInstant(ZoneOffset.UTC).toEpochMilli();
+                        })
+                        .withName("read-steps-events"))
+//                .transformValues(StepsManager::setStepsTimestamp, Named.as("set-steps-timestamp"))
+                .join(customerTable, StepsManager::stepsCustomerJoin, Joined.as("join-steps-and-customer"));
 
         // 3. Sum steps per day
         final var sumStepsStream = enrichedStepsStream
                 .groupByKey(Grouped.as("group-customer-steps-by-entity-id"))
                 .windowedBy(TimeWindows.ofSizeAndGrace(Duration.ofDays(1), Duration.ofDays(30)))
-                .reduce(StepsManager::stepsSum, Named.as("sum-steps"), Materialized.with(Serdes.String(), JsonSerde.withType(CustomerSteps.class)))
+                .reduce(StepsManager::stepsSum, Named.as("sum-steps"),
+                        Materialized.<String, CustomerSteps, WindowStore<Bytes, byte[]>>as("steps-sum")
+                                .withKeySerde(Serdes.String())
+                                .withValueSerde(JsonSerde.withType(CustomerSteps.class)))
                 .toStream(Named.as("to-changelog"));
 
         // 4. Map Steps to Points
         // rules to map steps to points
         builder.globalTable("steps-points",
-                Consumed.with(Serdes.String(), JsonSerde.withType(StepsPoints.class)),
-                Materialized.as("steps-points"));
+                Consumed.with(Serdes.String(), JsonSerde.withType(StepsPoints.class))
+                        .withName("read-steps-points-rules"),
+                Materialized.<String, StepsPoints, KeyValueStore<Bytes, byte[]>>as("steps-points")
+                        .withKeySerde(Serdes.String())
+                        .withValueSerde(JsonSerde.withType(StepsPoints.class)));
 
         // map steps to points
         final var pointsStream = sumStepsStream
-                .transform(StepsManager::addPoints);
+                .transform(StepsManager::addPoints, Named.as("add-points"));
 
         // 5. Validate points per day
         // Prepare window store per day
@@ -84,10 +98,10 @@ class StepsManager implements Supplier<Topology> {
 
         // Validate points
         final var pointsValidPerDay = pointsStream
-                .peek((key, value) -> System.out.println("Points before checking: " + value))
-                .transformValues(StepsManager::validateMaxPointsPerDay, "points-per-day")
-                .peek((key, value) -> System.out.println("Points after checking: " + value))
-                .filterNot((key, value) -> Objects.isNull(value));
+                .peek((key, value) -> System.out.println("Points before checking: " + value), Named.as("peek-points-before"))
+                .transformValues(StepsManager::validateMaxPointsPerDay, Named.as("validate-points-per-day"), "points-per-day")
+                .peek((key, value) -> System.out.println("Points after checking: " + value), Named.as("peek-points-after"))
+                .filterNot((key, value) -> Objects.isNull(value), Named.as("filter-only-when-points-change"));
 
         // 6. Write activity points
         // downstream activity points
@@ -109,6 +123,31 @@ class StepsManager implements Supplier<Topology> {
     static CustomerSteps stepsSum(CustomerSteps left, CustomerSteps right) {
         System.out.println("Sum steps from customer " + left.customer() + ": " + left.stepsCount() + " and " + right.stepsCount());
         return new CustomerSteps(left.customer(), left.dateOfRecording(), left.stepsCount() + right.stepsCount());
+    }
+
+    static  ValueTransformerWithKey<String, Steps, Steps> setStepsTimestamp() {
+        return new ValueTransformerWithKey<>() {
+            ProcessorContext context;
+
+            @Override
+            public void init(ProcessorContext context) {
+                this.context = context;
+            }
+
+            @Override
+            public Steps transform(String readOnlyKey, Steps value) {
+                context.forward(readOnlyKey, value,
+                        To.all().withTimestamp(
+                                value.dateOfRecording()
+                                        .toInstant(ZoneOffset.UTC)
+                                        .toEpochMilli()));
+                return null;
+            }
+
+            @Override
+            public void close() {
+            }
+        };
     }
 
     static ValueTransformer<ActivityPoints, ActivityPoints> validateMaxPointsPerDay() {
