@@ -7,7 +7,6 @@ import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.Topology;
 import org.apache.kafka.streams.kstream.*;
 import org.apache.kafka.streams.processor.ProcessorContext;
-import org.apache.kafka.streams.processor.To;
 import org.apache.kafka.streams.state.KeyValueStore;
 import org.apache.kafka.streams.state.Stores;
 import org.apache.kafka.streams.state.ValueAndTimestamp;
@@ -21,6 +20,9 @@ import java.util.Objects;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+/**
+ * Kafka Streams topology supplier to produce Points out of Steps.
+ */
 class StepsManager implements Supplier<Topology> {
 
     @Override
@@ -59,7 +61,6 @@ class StepsManager implements Supplier<Topology> {
                             return r.dateOfRecording().toInstant(ZoneOffset.UTC).toEpochMilli();
                         })
                         .withName("read-steps-events"))
-//                .transformValues(StepsManager::setStepsTimestamp, Named.as("set-steps-timestamp"))
                 .join(customerTable, StepsManager::stepsCustomerJoin, Joined.as("join-steps-and-customer"));
 
         // 3. Sum steps per day
@@ -90,7 +91,7 @@ class StepsManager implements Supplier<Topology> {
         builder.addStateStore(Stores.windowStoreBuilder(
                 Stores.persistentWindowStore(
                         "points-per-day",
-                        Duration.ofDays(7), // retention
+                        Duration.ofDays(30), // retention
                         Duration.ofDays(1), // window size
                         false),
                 Serdes.String(),
@@ -109,45 +110,11 @@ class StepsManager implements Supplier<Topology> {
                 Produced.with(Serdes.String(), JsonSerde.withType(ActivityPoints.class))
                         .withName("write-points-from-steps"));
         return builder.build();
-
-        // point limits: (per person)
-        // - 40 per week
-        // - 8 per day
-
-        // queries:
-        // - per year:
-        //   - per person
-        //   - per policy (dependents)
     }
 
     static CustomerSteps stepsSum(CustomerSteps left, CustomerSteps right) {
         System.out.println("Sum steps from customer " + left.customer() + ": " + left.stepsCount() + " and " + right.stepsCount());
         return new CustomerSteps(left.customer(), left.dateOfRecording(), left.stepsCount() + right.stepsCount());
-    }
-
-    static  ValueTransformerWithKey<String, Steps, Steps> setStepsTimestamp() {
-        return new ValueTransformerWithKey<>() {
-            ProcessorContext context;
-
-            @Override
-            public void init(ProcessorContext context) {
-                this.context = context;
-            }
-
-            @Override
-            public Steps transform(String readOnlyKey, Steps value) {
-                context.forward(readOnlyKey, value,
-                        To.all().withTimestamp(
-                                value.dateOfRecording()
-                                        .toInstant(ZoneOffset.UTC)
-                                        .toEpochMilli()));
-                return null;
-            }
-
-            @Override
-            public void close() {
-            }
-        };
     }
 
     static ValueTransformer<ActivityPoints, ActivityPoints> validateMaxPointsPerDay() {
