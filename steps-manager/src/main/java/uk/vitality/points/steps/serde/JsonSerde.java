@@ -17,6 +17,10 @@ public class JsonSerde<T> implements Serde<T> {
         this.type = type;
     }
 
+    public static <T> JsonSerde<T> withType(Class<T> type) {
+        return new JsonSerde<>(type);
+    }
+
     @Override
     public Serializer<T> serializer() {
         return new JsonSerializer<>();

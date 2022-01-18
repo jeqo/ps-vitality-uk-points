@@ -1,10 +1,10 @@
 package uk.vitality.points.steps.model;
 
-import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 public record Steps (
         String entityId,
-        LocalDate dateOfRecording,
+        LocalDateTime dateOfRecording,
         Integer stepsCount
 ) {
 }
