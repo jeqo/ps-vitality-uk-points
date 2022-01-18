@@ -24,12 +24,14 @@ public class Producers {
         public static void main(String[] args) throws IOException {
             final var props = loadProperties(args);
             final var producer = new KafkaProducer<>(props, new StringSerializer(), new JsonSerde<>(StepsPoints.class).serializer());
-            final var stepsPoints1 = new StepsPoints(7_000, 9_999, 3);
+            final var stepsPoints0 = new StepsPoints(0, 7_000, 0);
+            producer.send(new ProducerRecord<>("steps-points", "rule_0", stepsPoints0));
+            final var stepsPoints1 = new StepsPoints(7_000, 10_000, 3);
             producer.send(new ProducerRecord<>("steps-points", "rule_1", stepsPoints1));
-            final var stepsPoints2 = new StepsPoints(10_000, 12_499, 5);
-            producer.send(new ProducerRecord<>("steps-points", "rule_1", stepsPoints2));
+            final var stepsPoints2 = new StepsPoints(10_000, 12_500, 5);
+            producer.send(new ProducerRecord<>("steps-points", "rule_2", stepsPoints2));
             final var stepsPoints3 = new StepsPoints(12_500, Integer.MAX_VALUE, 8);
-            producer.send(new ProducerRecord<>("steps-points", "rule_1", stepsPoints3));
+            producer.send(new ProducerRecord<>("steps-points", "rule_3", stepsPoints3));
             producer.close();
         }
     }
@@ -38,9 +40,9 @@ public class Producers {
         public static void main(String[] args) throws IOException {
             final var props = loadProperties(args);
             final var producer = new KafkaProducer<>(props, new StringSerializer(), new JsonSerde<>(Steps.class).serializer());
-            final var steps = new Steps("customer_1",
+            final var steps = new Steps("customer_3",
                     LocalDateTime.of(2022, 1, 17, 20, 0, 0),
-                    1000);
+                    500);
             producer.send(new ProducerRecord<>("steps", steps.entityId(), steps));
             producer.close();
         }
@@ -56,7 +58,7 @@ public class Producers {
                     LocalDate.of(2021, 1, 1),
                     LocalDate.of(2025, 12, 31),
                     "customer_1",
-                    List.of("customer_1", "customer_2")
+                    List.of("customer_1", "customer_2", "customer_3", "customer_4")
             );
             producer.send(new ProducerRecord<>("policies", policy.policyId(), policy));
             producer.close();
@@ -69,7 +71,7 @@ public class Producers {
             final var producer = new KafkaProducer<>(props,
                     new StringSerializer(),
                     new JsonSerde<>(Entity.class).serializer());
-            final var entity = new Entity("customer_1", "person",
+            final var entity = new Entity("customer_3", "person",
                     "F", LocalDate.of(1990, 10, 10));
             producer.send(new ProducerRecord<>("entities", entity.entityId(), entity));
             producer.close();

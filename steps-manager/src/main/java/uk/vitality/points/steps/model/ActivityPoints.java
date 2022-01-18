@@ -7,6 +7,7 @@ public record ActivityPoints(
         Entity customer,
         String activityType,
         LocalDate date,
+        Integer steps,
         Integer points,
         String reason
 ) {

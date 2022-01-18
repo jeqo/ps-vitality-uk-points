@@ -19,7 +19,7 @@ public class Main {
     }
 
     private static Properties loadProperties(String[] args) throws IOException {
-        var name = "src/main/resources/streams";
+        var name = "steps-manager/src/main/resources/streams";
         final var streamsProps = new Properties();
         if (args.length >= 1) {
             name = name + "_" + args[0];
